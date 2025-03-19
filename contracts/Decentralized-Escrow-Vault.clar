@@ -493,4 +493,63 @@
   )
 )
 
+;; Cancel vault
+(define-public (cancel-vault (vault-id uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (amount (get amount vault-data))
+      )
+      (asserts! (is-eq tx-sender depositor) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (asserts! (<= block-height (get expiration-height vault-data)) ERROR_VAULT_EXPIRED)
+      (match (as-contract (stx-transfer? amount tx-sender depositor))
+        success
+          (begin
+            (map-set VaultRegistry
+              { vault-id: vault-id }
+              (merge vault-data { vault-state: "cancelled" })
+            )
+            (print {event: "vault_cancelled", vault-id: vault-id, depositor: depositor, amount: amount})
+            (ok true)
+          )
+        error ERROR_TRANSFER_FAILED
+      )
+    )
+  )
+)
+
+;; Process expired vault
+(define-public (process-expired (vault-id uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (amount (get amount vault-data))
+        (expiry (get expiration-height vault-data))
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq (get vault-state vault-data) "pending") (is-eq (get vault-state vault-data) "accepted")) ERROR_ALREADY_FINALIZED)
+      (asserts! (> block-height expiry) (err u108))
+      (match (as-contract (stx-transfer? amount tx-sender depositor))
+        success
+          (begin
+            (map-set VaultRegistry
+              { vault-id: vault-id }
+              (merge vault-data { vault-state: "expired" })
+            )
+            (print {event: "expired_vault_processed", vault-id: vault-id, depositor: depositor, amount: amount})
+            (ok true)
+          )
+        error ERROR_TRANSFER_FAILED
+      )
+    )
+  )
+)
+
 
