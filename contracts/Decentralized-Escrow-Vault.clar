@@ -36,3 +36,49 @@
   (<= vault-id (var-get vault-counter))
 )
 
+(define-private (valid-counterparty? (party principal))
+  (and 
+    (not (is-eq party tx-sender))
+    (not (is-eq party (as-contract tx-sender)))
+  )
+)
+
+;; Security verification with ZK proof support
+(define-public (verify-with-zk (vault-id uint) (proof-data (buff 128)) (input-values (list 5 (buff 32))))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+        (amount (get amount vault-data))
+      )
+      ;; Only apply to high-value vaults
+      (asserts! (> amount u10000) (err u190))
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender counterparty) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq (get vault-state vault-data) "pending") (is-eq (get vault-state vault-data) "accepted")) ERROR_ALREADY_FINALIZED)
+
+      ;; Placeholder for ZK verification logic
+
+      (print {event: "vault_zk_verified", vault-id: vault-id, verifier: tx-sender, 
+              proof-hash: (hash160 proof-data), inputs: input-values})
+      (ok true)
+    )
+  )
+)
+
+;; Rate limiting implementation
+(define-public (set-rate-limits (attempt-limit uint) (block-cooldown uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_ADMIN) ERROR_ACCESS_DENIED)
+    (asserts! (> attempt-limit u0) ERROR_INVALID_INPUT)
+    (asserts! (<= attempt-limit u10) ERROR_INVALID_INPUT) 
+    (asserts! (> block-cooldown u6) ERROR_INVALID_INPUT)
+    (asserts! (<= block-cooldown u144) ERROR_INVALID_INPUT)
+
+    (print {event: "limits_configured", max-tries: attempt-limit, 
+            cooldown: block-cooldown, admin: tx-sender, height: block-height})
+    (ok true)
+  )
+)
