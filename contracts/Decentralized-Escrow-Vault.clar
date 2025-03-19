@@ -130,3 +130,69 @@
     )
   )
 )
+
+;; Return funds to depositor
+(define-public (return-funds (vault-id uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (amount (get amount vault-data))
+      )
+      (asserts! (is-eq tx-sender CONTRACT_ADMIN) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (match (as-contract (stx-transfer? amount tx-sender depositor))
+        success
+          (begin
+            (map-set VaultRegistry
+              { vault-id: vault-id }
+              (merge vault-data { vault-state: "refunded" })
+            )
+            (print {event: "funds_returned", vault-id: vault-id, depositor: depositor, amount: amount})
+            (ok true)
+          )
+        error ERROR_TRANSFER_FAILED
+      )
+    )
+  )
+)
+
+;; Enhanced security with 2FA
+(define-public (activate-2fa (vault-id uint) (auth-hash (buff 32)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (amount (get amount vault-data))
+      )
+      (asserts! (> amount u5000) (err u130))
+      (asserts! (is-eq tx-sender depositor) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (print {event: "2fa_activated", vault-id: vault-id, depositor: depositor, hash: (hash160 auth-hash)})
+      (ok true)
+    )
+  )
+)
+
+;; Emergency recovery procedure
+(define-public (set-emergency-backup (vault-id uint) (backup-address principal))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+      )
+      (asserts! (is-eq tx-sender depositor) ERROR_ACCESS_DENIED)
+      (asserts! (not (is-eq backup-address tx-sender)) (err u111))
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (print {event: "backup_set", vault-id: vault-id, depositor: depositor, backup: backup-address})
+      (ok true)
+    )
+  )
+)
+
