@@ -328,4 +328,57 @@
 )
 
 
+;; Complete vault transaction
+(define-public (complete-vault (vault-id uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (counterparty (get counterparty vault-data))
+        (amount (get amount vault-data))
+        (item-id (get item-id vault-data))
+      )
+      (asserts! (or (is-eq tx-sender CONTRACT_ADMIN) (is-eq tx-sender (get depositor vault-data))) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (asserts! (<= block-height (get expiration-height vault-data)) ERROR_VAULT_EXPIRED)
+      (match (as-contract (stx-transfer? amount tx-sender counterparty))
+        success
+          (begin
+            (map-set VaultRegistry
+              { vault-id: vault-id }
+              (merge vault-data { vault-state: "completed" })
+            )
+            (print {event: "vault_completed", vault-id: vault-id, counterparty: counterparty, item-id: item-id, amount: amount})
+            (ok true)
+          )
+        error ERROR_TRANSFER_FAILED
+      )
+    )
+  )
+)
+
+;; Dispute handling
+(define-public (initiate-dispute (vault-id uint) (reason (string-ascii 50)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender counterparty)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq (get vault-state vault-data) "pending") (is-eq (get vault-state vault-data) "accepted")) ERROR_ALREADY_FINALIZED)
+      (asserts! (<= block-height (get expiration-height vault-data)) ERROR_VAULT_EXPIRED)
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { vault-state: "disputed" })
+      )
+      (print {event: "dispute_initiated", vault-id: vault-id, initiator: tx-sender, reason: reason})
+      (ok true)
+    )
+  )
+)
+
 
