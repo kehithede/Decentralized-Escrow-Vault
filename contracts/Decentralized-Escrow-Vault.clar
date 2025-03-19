@@ -290,4 +290,42 @@
   )
 )
 
+;; Add cryptographic signature
+(define-public (add-crypto-signature (vault-id uint) (signature (buff 65)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender counterparty)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq (get vault-state vault-data) "pending") (is-eq (get vault-state vault-data) "accepted")) ERROR_ALREADY_FINALIZED)
+      (print {event: "signature_recorded", vault-id: vault-id, signer: tx-sender, signature: signature})
+      (ok true)
+    )
+  )
+)
+
+;; Multi-signature approval for high-value vaults
+(define-public (register-multisig-approval (vault-id uint) (approver principal))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (amount (get amount vault-data))
+      )
+      (asserts! (> amount u1000) (err u120))
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (print {event: "multisig_registered", vault-id: vault-id, approver: approver, requestor: tx-sender})
+      (ok true)
+    )
+  )
+)
+
+
 
