@@ -436,5 +436,61 @@
   )
 )
 
+;; Extend vault expiration
+(define-public (extend-time (vault-id uint) (additional-blocks uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (asserts! (> additional-blocks u0) ERROR_INVALID_INPUT)
+    (asserts! (<= additional-blocks u1440) ERROR_INVALID_INPUT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data)) 
+        (counterparty (get counterparty vault-data))
+        (current-expiry (get expiration-height vault-data))
+        (new-expiry (+ current-expiry additional-blocks))
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender counterparty) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq (get vault-state vault-data) "pending") (is-eq (get vault-state vault-data) "accepted")) ERROR_ALREADY_FINALIZED)
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { expiration-height: new-expiry })
+      )
+      (print {event: "time_extended", vault-id: vault-id, requestor: tx-sender, new-expiry: new-expiry})
+      (ok true)
+    )
+  )
+)
+
+;; Secured vault withdrawal
+(define-public (process-secure-withdrawal (vault-id uint) (withdrawal-amount uint) (approval-sig (buff 65)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+        (amount (get amount vault-data))
+        (state (get vault-state vault-data))
+      )
+      (asserts! (is-eq tx-sender CONTRACT_ADMIN) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq state "disputed") (err u220))
+      (asserts! (<= withdrawal-amount amount) ERROR_INVALID_INPUT)
+      (asserts! (>= block-height (+ (get creation-height vault-data) u48)) (err u221))
+
+      (unwrap! (as-contract (stx-transfer? withdrawal-amount tx-sender depositor)) ERROR_TRANSFER_FAILED)
+
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { amount: (- amount withdrawal-amount) })
+      )
+
+      (print {event: "secure_withdrawal_completed", vault-id: vault-id, depositor: depositor, 
+              amount: withdrawal-amount, remaining: (- amount withdrawal-amount)})
+      (ok true)
+    )
+  )
+)
 
 
