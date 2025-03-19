@@ -248,3 +248,46 @@
 )
 
 
+;; Schedule critical operation with timelock
+(define-public (schedule-operation (op-name (string-ascii 20)) (op-params (list 10 uint)))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_ADMIN) ERROR_ACCESS_DENIED)
+    (asserts! (> (len op-params) u0) ERROR_INVALID_INPUT)
+    (let
+      (
+        (execute-at (+ block-height u144))
+      )
+      (print {event: "operation_scheduled", operation: op-name, params: op-params, execute-at: execute-at})
+      (ok execute-at)
+    )
+  )
+)
+
+;; Add metadata to vault
+(define-public (add-vault-metadata (vault-id uint) (metadata-kind (string-ascii 20)) (data-hash (buff 32)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender counterparty) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (not (is-eq (get vault-state vault-data) "completed")) (err u160))
+      (asserts! (not (is-eq (get vault-state vault-data) "refunded")) (err u161))
+      (asserts! (not (is-eq (get vault-state vault-data) "expired")) (err u162))
+
+      (asserts! (or (is-eq metadata-kind "item-details") 
+                   (is-eq metadata-kind "delivery-proof")
+                   (is-eq metadata-kind "quality-check")
+                   (is-eq metadata-kind "depositor-preferences")) (err u163))
+
+      (print {event: "metadata_attached", vault-id: vault-id, kind: metadata-kind, 
+              hash: data-hash, submitter: tx-sender})
+      (ok true)
+    )
+  )
+)
+
+
