@@ -552,4 +552,59 @@
   )
 )
 
+;; Process delayed withdrawal
+(define-public (finalize-delayed-withdrawal (vault-id uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (amount (get amount vault-data))
+        (state (get vault-state vault-data))
+        (time-lock u24)
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq state "withdrawal-pending") (err u301))
+      (asserts! (>= block-height (+ (get creation-height vault-data) time-lock)) (err u302))
+
+      (unwrap! (as-contract (stx-transfer? amount tx-sender depositor)) ERROR_TRANSFER_FAILED)
+
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { vault-state: "withdrawn", amount: u0 })
+      )
+
+      (print {event: "delayed_withdrawal_finalized", vault-id: vault-id, 
+              depositor: depositor, amount: amount})
+      (ok true)
+    )
+  )
+)
+
+;; Flag suspicious vault
+(define-public (flag-suspicious (vault-id uint) (reason (string-ascii 100)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+      )
+      (asserts! (or (is-eq tx-sender CONTRACT_ADMIN) (is-eq tx-sender depositor) (is-eq tx-sender counterparty)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq (get vault-state vault-data) "pending") 
+                   (is-eq (get vault-state vault-data) "accepted")) 
+                ERROR_ALREADY_FINALIZED)
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { vault-state: "frozen" })
+      )
+      (print {event: "vault_flagged", vault-id: vault-id, reporter: tx-sender, reason: reason})
+      (ok true)
+    )
+  )
+)
+
+
 
