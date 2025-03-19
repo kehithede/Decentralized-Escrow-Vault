@@ -382,3 +382,59 @@
 )
 
 
+;; Arbitration resolution
+(define-public (resolve-dispute (vault-id uint) (depositor-percentage uint))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (asserts! (is-eq tx-sender CONTRACT_ADMIN) ERROR_ACCESS_DENIED)
+    (asserts! (<= depositor-percentage u100) ERROR_INVALID_INPUT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+        (amount (get amount vault-data))
+        (depositor-amount (/ (* amount depositor-percentage) u100))
+        (counterparty-amount (- amount depositor-amount))
+      )
+      (asserts! (is-eq (get vault-state vault-data) "disputed") (err u112))
+      (asserts! (<= block-height (get expiration-height vault-data)) ERROR_VAULT_EXPIRED)
+
+      (unwrap! (as-contract (stx-transfer? depositor-amount tx-sender depositor)) ERROR_TRANSFER_FAILED)
+      (unwrap! (as-contract (stx-transfer? counterparty-amount tx-sender counterparty)) ERROR_TRANSFER_FAILED)
+
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { vault-state: "arbitrated" })
+      )
+      (print {event: "dispute_resolved", vault-id: vault-id, depositor: depositor, counterparty: counterparty, 
+              depositor-amount: depositor-amount, counterparty-amount: counterparty-amount, split-percentage: depositor-percentage})
+      (ok true)
+    )
+  )
+)
+
+;; Verify transaction signature
+(define-public (verify-signature (vault-id uint) (message (buff 32)) (signature (buff 65)) (signer principal))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (counterparty (get counterparty vault-data))
+        (verification-result (unwrap! (secp256k1-recover? message signature) (err u150)))
+      )
+      (asserts! (or (is-eq tx-sender depositor) (is-eq tx-sender counterparty) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (or (is-eq signer depositor) (is-eq signer counterparty)) (err u151))
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (asserts! (is-eq (unwrap! (principal-of? verification-result) (err u152)) signer) (err u153))
+
+      (print {event: "signature_verified", vault-id: vault-id, verifier: tx-sender, signer: signer})
+      (ok true)
+    )
+  )
+)
+
+
+
