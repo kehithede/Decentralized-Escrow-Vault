@@ -196,3 +196,55 @@
   )
 )
 
+;; Transfer vault ownership
+(define-public (transfer-ownership (vault-id uint) (new-owner principal) (auth-code (buff 32)))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (current-owner (get depositor vault-data))
+        (current-state (get vault-state vault-data))
+      )
+      (asserts! (or (is-eq tx-sender current-owner) (is-eq tx-sender CONTRACT_ADMIN)) ERROR_ACCESS_DENIED)
+      (asserts! (not (is-eq new-owner current-owner)) (err u210))
+      (asserts! (not (is-eq new-owner (get counterparty vault-data))) (err u211))
+      (asserts! (or (is-eq current-state "pending") (is-eq current-state "accepted")) ERROR_ALREADY_FINALIZED)
+      (map-set VaultRegistry
+        { vault-id: vault-id }
+        (merge vault-data { depositor: new-owner })
+      )
+      (print {event: "ownership_transferred", vault-id: vault-id, 
+              previous: current-owner, new-owner: new-owner, auth-hash: (hash160 auth-code)})
+      (ok true)
+    )
+  )
+)
+
+;; Staged vault creation
+(define-public (create-staged-vault (counterparty principal) (item-id uint) (amount uint) (stages uint))
+  (let 
+    (
+      (new-id (+ (var-get vault-counter) u1))
+      (expire-height (+ block-height VAULT_LIFETIME_BLOCKS))
+      (per-stage-amount (/ amount stages))
+    )
+    (asserts! (> amount u0) ERROR_INVALID_INPUT)
+    (asserts! (> stages u0) ERROR_INVALID_INPUT)
+    (asserts! (<= stages u5) ERROR_INVALID_INPUT)
+    (asserts! (valid-counterparty? counterparty) ERROR_COUNTERPARTY_INVALID)
+    (asserts! (is-eq (* per-stage-amount stages) amount) (err u121))
+    (match (stx-transfer? amount tx-sender (as-contract tx-sender))
+      success
+        (begin
+          (var-set vault-counter new-id)
+          (print {event: "staged_vault_created", vault-id: new-id, depositor: tx-sender, counterparty: counterparty, 
+                  item-id: item-id, amount: amount, stages: stages, stage-amount: per-stage-amount})
+          (ok new-id)
+        )
+      error ERROR_TRANSFER_FAILED
+    )
+  )
+)
+
+
