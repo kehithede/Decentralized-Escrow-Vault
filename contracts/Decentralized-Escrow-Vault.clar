@@ -82,3 +82,51 @@
     (ok true)
   )
 )
+
+;; Transaction velocity monitoring
+(define-public (analyze-transaction-patterns (party principal) (time-span uint) (tx-count uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_ADMIN) ERROR_ACCESS_DENIED)
+    (asserts! (> time-span u0) ERROR_INVALID_INPUT)
+    (asserts! (> tx-count u0) ERROR_INVALID_INPUT)
+
+    (let
+      (
+        (tx-rate (/ tx-count time-span))
+        (suspicious-activity (> tx-rate u3))
+      )
+      (if suspicious-activity
+        (print {event: "suspicious_activity", party: party, 
+                transactions: tx-count, timeframe: time-span,
+                rate: tx-rate, threshold: u3})
+        (print {event: "normal_activity", party: party, 
+                transactions: tx-count, timeframe: time-span,
+                rate: tx-rate, threshold: u3})
+      )
+      (ok suspicious-activity)
+    )
+  )
+)
+
+;; Emergency recovery vault creation
+(define-public (establish-recovery-vault (vault-id uint) (delay-blocks uint) (backup-address principal))
+  (begin
+    (asserts! (valid-vault? vault-id) ERROR_INVALID_VAULT)
+    (asserts! (> delay-blocks u72) ERROR_INVALID_INPUT) 
+    (asserts! (<= delay-blocks u1440) ERROR_INVALID_INPUT)
+    (let
+      (
+        (vault-data (unwrap! (map-get? VaultRegistry { vault-id: vault-id }) ERROR_VAULT_NOT_FOUND))
+        (depositor (get depositor vault-data))
+        (unlock-height (+ block-height delay-blocks))
+      )
+      (asserts! (is-eq tx-sender depositor) ERROR_ACCESS_DENIED)
+      (asserts! (is-eq (get vault-state vault-data) "pending") ERROR_ALREADY_FINALIZED)
+      (asserts! (not (is-eq backup-address depositor)) (err u180))
+      (asserts! (not (is-eq backup-address (get counterparty vault-data))) (err u181))
+      (print {event: "recovery_established", vault-id: vault-id, depositor: depositor, 
+              backup: backup-address, unlock-at: unlock-height})
+      (ok unlock-height)
+    )
+  )
+)
